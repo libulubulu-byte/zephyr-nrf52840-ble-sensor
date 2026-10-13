@@ -1,0 +1,19 @@
+identifier: nrf52840_supermini
+name: SuperMini nRF52840 (nice!nano v2 compatible)
+type: mcu
+arch: arm
+ram: 256
+flash: 824
+toolchain:
+  - zephyr
+  - gnuarmemb
+supported:
+  - adc
+  - ble
+  - counter
+  - gpio
+  - i2c
+  - usb_device
+  - usb_cdc
+  - watchdog
+vendor: nordic

@@ -1,0 +1,25 @@
+timestamp_iso8601,state,build,current_ua,notes
+# Power consumption of the BLE environmental sensor node.
+# Schema: timestamp_iso8601,state,build,current_ua,notes
+#
+# current_ua is an in-series reading through a 100 ohm shunt on the mV range,
+# USB disconnected, the charger's input floating, RST untouched - the three
+# rules in data/README.md. A reading that was not taken that way does not
+# belong here, and the three wrong ones that were are written up in
+# docs/DEBUG_NOTES.md rather than deleted.
+#
+# state        one of: standby_rtc | standby_led | connected_2s | offline_burst
+# build        the APP_VERSION_STRING reported in the boot banner
+# current_ua   microamperes, in series measurement
+#
+# Expected ordering: standby_rtc < standby_led << connected_2s
+# Acceptance target for standby_rtc: < 50 uA
+#
+# The time of day is not recorded for the rows below; the date is. An empty
+# timestamp means the reading has not been taken yet, not that it was zero.
+#
+2026-10-12T00:00:00+08:00,standby_rtc,1.0.16,50,"ACCEPTANCE MET: <= 50 uA. ME6217 removed, board fed 3.6 V direct. LED off, no central connected, 2 s advertising, 30 s sampling"
+2026-10-12T00:00:00+08:00,standby_rtc,,99,"the same board as shipped - ME6217 in circuit; the image on the board was not recorded. This is the regulator's quiescent current, not the application. See docs/DEBUG_NOTES.md"
+,standby_led,,,"PENDING - APP_LED_HEARTBEAT_ENABLE=1, the comparison that justifies README section 6"
+,connected_2s,,,"PENDING - central connected, 100 ms interval, 2 s notify"
+,offline_burst,,,"PENDING - peak during a 200 ms sampling window (not an average)"

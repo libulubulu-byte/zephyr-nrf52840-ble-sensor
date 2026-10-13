@@ -1,0 +1,36 @@
+/*
+ * Application overlay for the BLE environmental sensor node.
+ *
+ * Everything here is a *project* decision; the board definition in
+ * boards/nordic/nrf52840_supermini/ owns the SoC, flash layout, LED and
+ * console. Keeping the split explicit means the same application can be
+ * rebuilt for an nRF52840 DK by swapping the board target and pointing the
+ * sensor at whatever pins the DK is wired to.
+ *
+ * Wiring
+ * ------
+ *   SHT31 VIN  -> 3V3
+ *   SHT31 GND  -> GND
+ *   SHT31 SDA  -> P1.04   (silkscreen "104")
+ *   SHT31 SCL  -> P1.06   (silkscreen "106")
+ *   SHT31 ADDR -> GND     (selects I2C address 0x44)
+ *
+ * 3V3 and the two I2C lines are all the sensor needs; the pull-ups are on
+ * the breakout board. The data lines sit on the nRF52840's internal pull-ups
+ * in sleep mode as well, which is why pinctrl marks them low-power-enable.
+ */
+
+&i2c0 {
+	clock-frequency = <I2C_BITRATE_STANDARD>; /* 100 kHz */
+
+	sht3xd: sht3xd@44 {
+		compatible = "sensirion,sht3xd";
+		reg = <0x44>;
+
+		/*
+		 * The SHT31 supports up to 1 MHz, but 100 kHz keeps the
+		 * wiring forgiving on a breadboard and costs nothing at a
+		 * 2 s sample interval.
+		 */
+	};
+};

@@ -1,0 +1,19 @@
+# SuperMini nRF52840 (nice!nano v2 compatible) board configuration
+
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_ENABLE_DCDC
+	bool "Enable the nRF52840 internal DC/DC regulator"
+	select SOC_DCDC_NRF52X
+	default n
+	depends on BOARD_NRF52840_SUPERMINI
+	help
+	  Enable REG1/REG0 DC/DC operation. This measurably lowers average
+	  current (typically 20-30 % while advertising), but it only works if
+	  the board actually populates the DC/DC inductors.
+
+	  The nice!nano v2 does; most SuperMini clones copy that reference
+	  design, but it has not been verified on every batch, so this is off
+	  by default. Turn it on and confirm the board still boots before
+	  trusting the power numbers.

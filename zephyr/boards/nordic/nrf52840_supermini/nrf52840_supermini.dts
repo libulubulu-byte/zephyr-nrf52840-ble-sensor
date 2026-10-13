@@ -1,0 +1,233 @@
+/*
+ * SuperMini nRF52840 - a nice!nano v2 compatible clone.
+ *
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * This board definition exists because upstream Zephyr ships no nRF52840
+ * board that matches this hardware. The parts that matter and where they come
+ * from:
+ *
+ *   - LED on P0.15, active high: taken from the Adafruit nRF52 bootloader's
+ *     src/boards/nice_nano/board.h (LED_PRIMARY_PIN PINNUM(0,15),
+ *     LED_STATE_ON 1).
+ *   - Flash layout: the Adafruit bootloader reserves 0x00000-0x26000 for the
+ *     MBR plus SoftDevice S140 and 0xF4000-0x100000 for itself, so the
+ *     application is linked at 0x26000.
+ *   - USB CDC ACM is the console, because the board has no UART bridge.
+ */
+
+/dts-v1/;
+
+#include <nordic/nrf52840_qiaa.dtsi>
+#include "nrf52840_supermini-pinctrl.dtsi"
+
+/ {
+	model = "SuperMini nRF52840 (nice!nano v2 compatible)";
+	compatible = "nordic,nrf52840-supermini";
+
+	chosen {
+		zephyr,console = &cdc_acm_uart;
+		zephyr,shell-uart = &cdc_acm_uart;
+		zephyr,uart-mcumgr = &cdc_acm_uart;
+		zephyr,bt-mon-uart = &cdc_acm_uart;
+		zephyr,bt-c2h-uart = &cdc_acm_uart;
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+		zephyr,code-partition = &code_partition;
+
+		/*
+		 * nrf52840.dtsi points zephyr,entropy at the CryptoCell block,
+		 * which only exists when the nRF Security subsystem is present
+		 * (the sdk-nrfxlib module). This application does not use it, so
+		 * the chosen node would reference a device that is never built
+		 * and the random subsystem fails to link
+		 * (`undefined reference to __device_dts_ord_N`).
+		 *
+		 * Point it at the nRF52840's own true random number generator
+		 * instead, which is what CONFIG_ENTROPY_NRF5_RNG drives.
+		 */
+		zephyr,entropy = &rng;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		led0: led_0 {
+			gpios = <&gpio0 15 GPIO_ACTIVE_HIGH>;
+			label = "Blue LED";
+		};
+	};
+
+	aliases {
+		led0 = &led0;
+		mcuboot-led0 = &led0;
+		watchdog0 = &wdt0;
+	};
+
+	/*
+	 * Battery voltage sensing. TWO dividers exist on this hardware and both
+	 * are described here, because which one the application reads has been
+	 * changed back and forth several times and the choice is a one-line
+	 * setting rather than a hardware decision:
+	 *
+	 *   index 0 - channel 2, AIN2, P0.04 - the board's own divider
+	 *
+	 *     BAT+ ---[ 100k ]---+--- AIN2 / P0.04
+	 *                        |
+	 *                     [ 100k ]
+	 *                        |
+	 *                       GND
+	 *
+	 *     200k permanently across the cell: 18 uA at 3.6 V, 21 uA at a full
+	 *     4.2 V. Soldered to the cell and to ground with no pin in between,
+	 *     so nothing the firmware does can switch it off. Reading it costs
+	 *     nothing extra - it draws either way - but depending on it means
+	 *     giving up the option of ever stopping it.
+	 *
+	 *   index 1 - channel 5, AIN5, P0.29 pad "029" - a divider of our own
+	 *
+	 *     600k + 600k = 3.0 uA, and the number matters less than the fact
+	 *     that this divider is ours to change: give its top leg a GPIO and
+	 *     it is powered only for the milliseconds the ADC is sampling,
+	 *     ~0.017 uA averaged. That cannot be done to the board's.
+	 *
+	 * Both are 1:1, so APP_BATT_DIVIDER_NUM/DEN is 2/1 either way and moving
+	 * between them does not touch the conversion at all - only what can be
+	 * done about the current later.
+	 *
+	 * Which one is read is set by APP_BATT_SENSE_CHANNEL_IDX in
+	 * src/app_config.h, against the order of the io-channels list below.
+	 * Active is listed second, so the compiler's default (index 0) is the
+	 * board's own divider and the external one is an explicit opt-in.
+	 *
+	 * The nRF52840 has eight SAADC channels and they are all on port 0:
+	 *
+	 *   AIN0 P0.02 (pad "002")   AIN4 P0.28
+	 *   AIN1 P0.03               AIN5 P0.29 (pad "029")
+	 *   AIN2 P0.04               AIN6 P0.30
+	 *   AIN3 P0.05               AIN7 P0.31 (pad "031")
+	 *
+	 * No P1.xx pin has an analog input at all, whatever the silkscreen
+	 * suggests - the board prints the port number directly ("102" = P1.02).
+	 *
+	 * The gain and reference in both channel nodes below give a 0-3.6 V range
+	 * at the pin. The multiplier that turns that into a battery voltage lives
+	 * in APP_BATT_DIVIDER_NUM/DEN (see src/app_config.h).
+	 */
+	zephyr,user {
+		/* index 0 = P0.04 (board divider), index 1 = P0.29 (external) */
+		io-channels = <&adc 2>, <&adc 5>;
+	};
+};
+
+&adc {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/*
+	 * No zephyr,oversampling here, deliberately.
+	 *
+	 * nRF SAADC hardware oversampling raises the result's width: 12-bit
+	 * resolution with 4x oversampling produces a 14-bit value (0..16383)
+	 * for the same 0..VFS span. The nrfx driver hands that buffer straight
+	 * to the hardware (nrf_saadc_buffer_init) and does not rescale it, but
+	 * adc_raw_to_millivolts() divides by 2^sequence->resolution - 4096 for
+	 * resolution 12 - so the converted millivolts come out 4x too high.
+	 *
+	 * The first version of this file had oversampling = <4>, and the battery
+	 * reading was 65501 mV. Dividing that back by 5 and by 4 gives 3275 mV
+	 * at the pin, i.e. the sense pin sitting on the 3.3 V rail.
+	 *
+	 * Software averaging (APP_BATT_ADC_AVG samples in env_sensor.c) already
+	 * does the noise reduction that hardware oversampling would have
+	 * provided, without the resolution trap.
+	 */
+	/*
+	 * Both sense inputs are defined, and only one of them is used at a time -
+	 * see the io-channels comment above. Defining both costs nothing at
+	 * runtime: an unused ADC channel is not configured and does not sample.
+	 * The divider feeding it, however, draws whether or not anything reads
+	 * it, which is the point of the whole comparison.
+	 */
+	channel@2 {
+		reg = <2>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)>;
+		zephyr,input-positive = <NRF_SAADC_AIN2>; /* P0.04, board divider */
+		zephyr,resolution = <12>;
+	};
+
+	channel@5 {
+		reg = <5>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)>;
+		zephyr,input-positive = <NRF_SAADC_AIN5>; /* P0.29, pad "029" */
+		zephyr,resolution = <12>;
+	};
+};
+
+&gpiote {
+	status = "okay";
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&gpio1 {
+	status = "okay";
+};
+
+&i2c0 {
+	compatible = "nordic,nrf-twi";
+	status = "okay";
+	pinctrl-0 = <&i2c0_default>;
+	pinctrl-1 = <&i2c0_sleep>;
+	pinctrl-names = "default", "sleep";
+};
+
+/*
+ * Flash layout imposed by the Adafruit UF2 bootloader.
+ *
+ *   0x00000000 - 0x00026000   MBR + SoftDevice S140 v7   (bootloader owned)
+ *   0x00026000 - 0x000F4000   application                (this file)
+ *   0x000F4000 - 0x00100000   bootloader + settings      (bootloader owned)
+ *
+ * The application is never told about the first region: with
+ * CONFIG_USE_DT_CODE_PARTITION the image simply starts at code_partition and
+ * the bootloader jumps straight to it.
+ */
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		code_partition: partition@26000 {
+			label = "code";
+			reg = <0x00026000 0x000C0000>;
+		};
+
+		/* Reserved for NVS / settings. Unused today because the ring
+		 * buffer lives in RAM, but it keeps the layout honest and
+		 * leaves room for BLE bonding storage later.
+		 */
+		storage_partition: partition@e6000 {
+			label = "storage";
+			reg = <0x000e6000 0x0000e000>;
+		};
+	};
+};
+
+zephyr_udc0: &usbd {
+	compatible = "nordic,nrf-usbd";
+	status = "okay";
+
+	cdc_acm_uart: cdc_acm_uart {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};

@@ -1,0 +1,20 @@
+# Steady-state capture with no central connected, taken after the image had
+# already been running for ~30 s (so the boot banner is not in this window).
+# ANSI escape sequences stripped.
+#
+# What it shows:
+#   - the offline sampling cadence is exactly 30 s: 00:00:31, 00:01:01, 00:01:31
+#   - with no SHT31 wired, the sensor read fails and the battery ADC channel
+#     had never been configured. That second line is the bug described in the
+#     README: env_sensor_init() returned early on the missing sensor, so
+#     adc_channel_setup_dt() was never reached. Both are fixed now.
+#
+[00:00:31.247,589] <wrn> env_sensor: SHT31 fetch failed (-5)
+[00:00:31.247,619] <err> adc_nrfx_saadc: Channel 2 not configured
+[00:00:31.247,619] <wrn> power: sampling failed, keeping previous values
+[00:01:01.398,834] <wrn> env_sensor: SHT31 fetch failed (-5)
+[00:01:01.398,864] <err> adc_nrfx_saadc: Channel 2 not configured
+[00:01:01.398,895] <wrn> power: sampling failed, keeping previous values
+[00:01:31.551,666] <wrn> env_sensor: SHT31 fetch failed (-5)
+[00:01:31.551,696] <err> adc_nrfx_saadc: Channel 2 not configured
+[00:01:31.551,727] <wrn> power: sampling failed, keeping previous values

@@ -1,0 +1,31 @@
+# SuperMini nRF52840 (nice!nano v2 compatible) board configuration
+
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+# Enable the MPU
+CONFIG_ARM_MPU=y
+
+# Enable hardware stack protection
+CONFIG_HW_STACK_PROTECTION=y
+
+# Pinctrl and GPIO
+CONFIG_PINCTRL=y
+CONFIG_GPIO=y
+
+# Link the application at zephyr,code-partition (0x26000), which is where the
+# Adafruit bootloader jumps. Without this the image would be built for 0x0 and
+# would never start.
+CONFIG_USE_DT_CODE_PARTITION=y
+
+# Produce build/zephyr/zephyr.uf2 for the NICENANO mass-storage volume.
+CONFIG_BUILD_OUTPUT_UF2=y
+
+# The nrfx USB driver implies remote wakeup; this board has no VBUS gate.
+CONFIG_USB_DEVICE_REMOTE_WAKEUP=n
+
+# The application is a sensor node, not a general purpose computer: keep the
+# default float handling (SoftDevice Controller needs FPU access) but make
+# sure the FPU is not left powered on when idle.
+CONFIG_FPU=y
+CONFIG_FPU_SHARING=y

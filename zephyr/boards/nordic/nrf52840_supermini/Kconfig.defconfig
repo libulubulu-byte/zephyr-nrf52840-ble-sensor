@@ -1,0 +1,17 @@
+# SuperMini nRF52840 (nice!nano v2 compatible) board configuration
+
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_NRF52840_SUPERMINI
+
+# Enabling Bluetooth always means bringing up the link layer controller.
+config BT_CTLR
+	default BT
+
+# The board has USB but no VBUS sense pin wired to a gate, so remote wakeup
+# is not usable and costs a little power to track.
+config USB_DEVICE_REMOTE_WAKEUP
+	default n
+
+endif # BOARD_NRF52840_SUPERMINI

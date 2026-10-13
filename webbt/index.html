@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EnvNode - BLE Environmental Sensor</title>
+
+<!--
+  Web Bluetooth display page for the BLE environmental sensor node.
+
+  No dependencies, no CDN, no build step: one file, opened from localhost.
+  Everything it knows about the node is in the CONFIG block below, and every one
+  of those values was taken from the firmware rather than guessed:
+
+    zephyr/src/env_service.h   service and characteristic UUIDs, control codes
+    zephyr/src/history.h       the 8-byte packed record layout
+    zephyr/prj.conf            advertising name, notify cadence
+
+  Why localhost matters: Web Bluetooth is only available in a secure context.
+  file:// does not count. Serve this directory over http on localhost, or over
+  https, or the browser will not expose navigator.bluetooth at all:
+
+      python3 -m http.server 8000        # then open http://localhost:8000
+
+  Browser support: Chrome or Edge on desktop and Android. Safari on iOS does not
+  implement Web Bluetooth, and no wrapper page can change that.
+
+  All user-visible text is English, and that is checked rather than assumed:
+  scripts/check_webbt.py scans the page for CJK characters and expects none.
+-->
+
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --line: #2a2f3a;
+    --fg: #e6e9ef;
+    --dim: #8b93a7;
+    --temp: #ff8a5c;
+    --hum: #5cc8ff;
+    --batt: #7ee787;
+    --bad: #ff6b6b;
+    --good: #7ee787;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    background: var(--bg); color: var(--fg);
+    font: 15px/1.55 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  h1 small { color: var(--dim); font-weight: 400; font-size: 13px; margin-left: 8px; }
+  h2 { font-size: 14px; margin: 0 0 12px; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .8px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }
+  button {
+    background: var(--panel-2); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 9px; padding: 9px 15px; font: inherit; font-size: 14px; cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  button:hover:not(:disabled) { border-color: #4a5266; background: #232833; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: #2b5fd9; border-color: #2b5fd9; }
+  button.primary:hover:not(:disabled) { background: #3568e8; border-color: #3568e8; }
+  button.danger:hover:not(:disabled) { border-color: var(--bad); color: var(--bad); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-bottom: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; }
+  .card .label { color: var(--dim); font-size: 13px; margin-bottom: 6px; }
+  .card .value { font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .card .value .unit { font-size: 15px; color: var(--dim); font-weight: 400; margin-left: 4px; }
+  .card.temp .value { color: var(--temp); }
+  .card.hum  .value { color: var(--hum); }
+  .card.batt .value { color: var(--batt); }
+  .card .sub { color: var(--dim); font-size: 12px; margin-top: 6px; }
+  canvas { width: 100%; height: 170px; display: block; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
+  .pill.on { color: var(--good); border-color: #2f6b3a; background: #16261a; }
+  .pill.off { color: var(--dim); }
+  .pill.err { color: var(--bad); border-color: #6b2f2f; background: #261616; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--dim); font-weight: 500; }
+  .scroll { max-height: 260px; overflow: auto; border-radius: 8px; }
+  pre#log {
+    background: #0b0d11; border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px; margin: 0; max-height: 220px; overflow: auto;
+    font: 12px/1.6 ui-monospace, "Cascadia Mono", Consolas, monospace; color: #b8c0d0;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .note { background: #161b24; border: 1px solid var(--line); border-left: 3px solid #2b5fd9; border-radius: 8px; padding: 12px 14px; color: var(--dim); font-size: 13px; margin-bottom: 16px; }
+  .note b { color: var(--fg); font-weight: 600; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--dim); margin-top: 8px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>EnvNode <small>BLE environmental sensor &middot; Web Bluetooth panel</small></h1>
+    <div class="row">
+      <span id="state" class="pill off">Not connected</span>
+      <button id="connect" class="primary">Connect</button>
+      <button id="disconnect" disabled>Disconnect</button>
+    </div>
+  </header>
+
+  <div class="note">
+    <b>How to open this:</b> Web Bluetooth needs a secure context, and <code>file://</code> is not one.
+    Serve this directory over HTTP and use localhost:
+    <code>python3 -m http.server 8000</code> &rarr; <code>http://localhost:8000</code>.
+    <br><b>Browsers:</b> Chrome or Edge on desktop, or Chrome on Android.
+    <b>iOS Safari does not implement Web Bluetooth</b> &mdash; that is a browser limitation, not something a page can work around.
+  </div>
+
+  <div class="cards">
+    <div class="card temp">
+      <div class="label">Temperature</div>
+      <div class="value" id="temp">--<span class="unit">&deg;C</span></div>
+      <div class="sub" id="tempsub">Waiting for data</div>
+    </div>
+    <div class="card hum">
+      <div class="label">Relative humidity</div>
+      <div class="value" id="hum">--<span class="unit">%RH</span></div>
+      <div class="sub" id="humsub">Waiting for data</div>
+    </div>
+    <div class="card batt">
+      <div class="label">Battery voltage</div>
+      <div class="value" id="batt">--<span class="unit">mV</span></div>
+      <div class="sub" id="battsub">Waiting for data</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Live measurements</h2>
+    <canvas id="liveChart"></canvas>
+    <div class="legend">
+      <span><i style="background:var(--temp)"></i>Temperature (&deg;C)</span>
+      <span><i style="background:var(--hum)"></i>Humidity (%RH)</span>
+      <span id="liveCount" style="margin-left:auto">0 points</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Buffered history &mdash; replayed after a reconnect</h2>
+    <div class="row" style="margin-bottom:14px">
+      <button id="replay">Request replay (0x01)</button>
+      <button id="stopReplay">Stop replay (0x00)</button>
+      <button id="clear" class="danger">Clear history (0x02)</button>
+      <button id="bootloader" class="danger">Enter bootloader (0x03)</button>
+    </div>
+    <canvas id="histChart"></canvas>
+    <div class="legend">
+      <span><i style="background:var(--temp)"></i>Temperature (&deg;C)</span>
+      <span><i style="background:var(--hum)"></i>Humidity (%RH)</span>
+      <span id="histCount" style="margin-left:auto">0 records</span>
+    </div>
+    <div class="scroll" style="margin-top:14px">
+      <table>
+        <thead><tr><th>Device uptime (s)</th><th>Temperature (&deg;C)</th><th>Humidity (%RH)</th></tr></thead>
+        <tbody id="histBody"><tr><td colspan="3" style="color:var(--dim)">No data yet</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Log</h2>
+    <pre id="log"></pre>
+  </div>
+
+</div>
+
+<script>
+'use strict';
+
+/* ---------------------------------------------------------------------------
+ * Everything specific to the node lives here, and all of it came out of the
+ * firmware. Nothing is inferred.
+ * ------------------------------------------------------------------------ */
+const CONFIG = {
+  namePrefix: 'EnvNode',
+
+  serviceUuid: 'e0f10001-7b5a-4b1c-9a3d-6f2c8e4d5a10',
+  tempUuid:    'e0f10002-7b5a-4b1c-9a3d-6f2c8e4d5a10',
+  humUuid:     'e0f10003-7b5a-4b1c-9a3d-6f2c8e4d5a10',
+  battUuid:    'e0f10004-7b5a-4b1c-9a3d-6f2c8e4d5a10',
+  histUuid:    'e0f10005-7b5a-4b1c-9a3d-6f2c8e4d5a10',
+  ctrlUuid:    'e0f10006-7b5a-4b1c-9a3d-6f2c8e4d5a10',
+
+  // Scales. Temperature and humidity are both 0.01 units per LSB.
+  tempScale: 100,
+  humScale: 100,
+
+  // struct history_record { uint32_t uptime_s; int16_t temp_c100;
+  //                         uint16_t hum_pct100; } __packed;   -> 8 bytes,
+  // native (little-endian) on the nRF52840.
+  histRecordBytes: 8,
+
+  maxLivePoints: 600,
+
+  // Battery is only sampled by the node on its offline cadence, so polling it
+  // more often than that only fetches a value that has not changed.
+  batteryPollMs: 30000,
+};
+
+const CTRL = { STOP_REPLAY: 0x00, START_REPLAY: 0x01, CLEAR_HISTORY: 0x02, ENTER_BOOTLOADER: 0x03 };
+
+/* --------------------------------------------------------------------------- */
+const $ = (id) => document.getElementById(id);
+const logEl = $('log');
+
+const clock = () => new Date().toLocaleTimeString('en-GB', { hour12: false });
+
+function log(msg, kind) {
+  logEl.textContent += `[${clock()}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+  if (kind === 'err') console.error(msg); else console.log(msg);
+}
+
+function setState(text, cls) {
+  const el = $('state');
+  el.textContent = text;
+  el.className = 'pill ' + (cls || 'off');
+}
+
+/* ---------------------------------------------------------------------------
+ * Charts
+ *
+ * Hand-rolled on canvas rather than pulled from a CDN, because this page is
+ * meant to work on a machine that may never see the internet, and because a
+ * dependency would be more code than the drawing is.
+ *
+ * Two series with unrelated units are drawn against their own vertical ranges
+ * (that is what makes a 22 C line and a 60 %RH line both readable), so each
+ * series is labelled in its own colour instead of sharing an axis.
+ * ------------------------------------------------------------------------ */
+function drawChart(canvas, series) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const g = canvas.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+
+  const visible = series.filter((s) => s.points.length > 1);
+  if (!visible.length) {
+    g.fillStyle = '#8b93a7';
+    g.font = '13px system-ui, sans-serif';
+    g.textAlign = 'center';
+    g.fillText('Waiting for data', w / 2, h / 2);
+    return;
+  }
+
+  const padL = 8, padR = 8, padT = 10, padB = 18;
+  const iw = w - padL - padR, ih = h - padT - padB;
+
+  // A single time axis across all series: they are sampled together.
+  const n = Math.max(...visible.map((s) => s.points.length));
+
+  for (const s of visible) {
+    const vals = s.points.map((p) => p.y);
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    if (hi - lo < s.minSpan) { const c = (hi + lo) / 2; lo = c - s.minSpan / 2; hi = c + s.minSpan / 2; }
+    const margin = (hi - lo) * 0.12;
+    lo -= margin; hi += margin;
+
+    const x = (i) => padL + (n === 1 ? iw / 2 : (i / (n - 1)) * iw);
+    const y = (v) => padT + ih - ((v - lo) / (hi - lo)) * ih;
+
+    g.beginPath();
+    s.points.forEach((p, i) => (i ? g.lineTo(x(i), y(p.y)) : g.moveTo(x(i), y(p.y))));
+    g.strokeStyle = s.color;
+    g.lineWidth = 2;
+    g.lineJoin = 'round';
+    g.stroke();
+
+    // Current value at the right-hand end, in the series' own colour.
+    const last = s.points[s.points.length - 1];
+    g.fillStyle = s.color;
+    g.font = '600 12px ui-monospace, monospace';
+    g.textAlign = 'right';
+    g.fillText(last.y.toFixed(2) + s.unit, w - padR, Math.min(Math.max(y(last.y) - 6, 12), h - 4));
+  }
+
+  g.strokeStyle = '#2a2f3a';
+  g.lineWidth = 1;
+  g.beginPath(); g.moveTo(padL, h - padB + 0.5); g.lineTo(w - padR, h - padB + 0.5); g.stroke();
+}
+
+/* --------------------------------------------------------------------------- */
+const live = {
+  temp: { points: [], color: '#ff8a5c', unit: '°C', minSpan: 1 },
+  hum:  { points: [], color: '#5cc8ff', unit: '%RH', minSpan: 2 },
+};
+const hist = {
+  temp: { points: [], color: '#ff8a5c', unit: '°C', minSpan: 1 },
+  hum:  { points: [], color: '#5cc8ff', unit: '%RH', minSpan: 2 },
+};
+
+function redrawLive() {
+  drawChart($('liveChart'), [live.temp, live.hum]);
+  $('liveCount').textContent = live.temp.points.length + ' points';
+}
+function redrawHist() {
+  drawChart($('histChart'), [hist.temp, hist.hum]);
+  $('histCount').textContent = hist.temp.points.length + ' records';
+}
+
+let device = null, server = null;
+let tempChar = null, humChar = null, battChar = null, histChar = null, ctrlChar = null;
+
+/* ---------------------------------------------------------------------------
+ * Connection
+ * ------------------------------------------------------------------------ */
+async function connect() {
+  if (!navigator.bluetooth) {
+    log('navigator.bluetooth is not available here - open this page from localhost or https, and use a browser that implements it.', 'err');
+    setState('Not supported', 'err');
+    return;
+  }
+
+  try {
+    setState('Selecting device...', 'off');
+    log('Requesting a device (name prefix "' + CONFIG.namePrefix + '")...');
+
+    device = await navigator.bluetooth.requestDevice({
+      // Filtering by name prefix is what actually matches, because the node
+      // puts its name in the advertising data. The service UUID is declared as
+      // optional so it can be reached once connected even if the browser does
+      // not see it in the advertisement.
+      filters: [{ namePrefix: CONFIG.namePrefix }],
+      optionalServices: [CONFIG.serviceUuid],
+    });
+
+    device.addEventListener('gattserverdisconnected', onDisconnected);
+    log('Selected: ' + device.name);
+
+    setState('Connecting...', 'off');
+    server = await device.gatt.connect();
+    log('GATT connected');
+
+    const service = await server.getPrimaryService(CONFIG.serviceUuid);
+    log('Service acquired: ' + CONFIG.serviceUuid);
+
+    tempChar = await service.getCharacteristic(CONFIG.tempUuid);
+    humChar  = await service.getCharacteristic(CONFIG.humUuid);
+    battChar = await service.getCharacteristic(CONFIG.battUuid);
+    histChar = await service.getCharacteristic(CONFIG.histUuid);
+    ctrlChar = await service.getCharacteristic(CONFIG.ctrlUuid);
+    log('All five characteristics acquired');
+
+    await subscribe(tempChar, onTemp, 'Temperature');
+    await subscribe(humChar, onHum, 'Humidity');
+    await subscribe(histChar, onHistory, 'History');
+
+    // Battery is read once and then polled on the node's own cadence rather
+    // than notified: the node samples it less often than it samples the
+    // sensors, so asking for it faster would only fetch the same number.
+    await readBattery();
+    setInterval(() => { if (device && device.gatt.connected) readBattery(); }, CONFIG.batteryPollMs);
+
+    setState('Connected', 'on');
+    $('connect').disabled = true;
+    $('disconnect').disabled = false;
+  } catch (e) {
+    log('Connection failed: ' + e.message, 'err');
+    setState('Connection failed', 'err');
+  }
+}
+
+async function subscribe(char, handler, label) {
+  await char.startNotifications();
+  char.addEventListener('characteristicvaluechanged', handler);
+  log(label + ' notifications subscribed');
+}
+
+async function readBattery() {
+  try {
+    const dv = await battChar.readValue();
+    const mv = dv.getUint16(0, true);          // little-endian
+    $('batt').innerHTML = mv + '<span class="unit">mV</span>';
+    $('battsub').textContent = (mv / 1000).toFixed(3) + ' V';
+  } catch (e) {
+    $('battsub').textContent = 'Read failed: ' + e.message;
+  }
+}
+
+function onDisconnected() {
+  log('Device disconnected');
+  setState('Disconnected', 'off');
+  $('connect').disabled = false;
+  $('disconnect').disabled = true;
+}
+
+function disconnect() {
+  if (device && device.gatt.connected) device.gatt.disconnect();
+  else onDisconnected();
+}
+
+/* ---------------------------------------------------------------------------
+ * Notifications
+ *
+ * Both measurement characteristics carry one little-endian integer with two
+ * implied decimal places, so 2143 is 21.43 C and 4587 is 45.87 %RH.
+ * ------------------------------------------------------------------------ */
+function onTemp(ev) {
+  const c100 = ev.target.value.getInt16(0, true);
+  const c = c100 / CONFIG.tempScale;
+  $('temp').innerHTML = c.toFixed(2) + '<span class="unit">°C</span>';
+  $('tempsub').textContent = clock() + '  ·  raw ' + c100;
+  live.temp.points.push({ y: c });
+  if (live.temp.points.length > CONFIG.maxLivePoints) live.temp.points.shift();
+  redrawLive();
+}
+
+function onHum(ev) {
+  const p100 = ev.target.value.getUint16(0, true);
+  const p = p100 / CONFIG.humScale;
+  $('hum').innerHTML = p.toFixed(2) + '<span class="unit">%RH</span>';
+  $('humsub').textContent = clock() + '  ·  raw ' + p100;
+  live.hum.points.push({ y: p });
+  if (live.hum.points.length > CONFIG.maxLivePoints) live.hum.points.shift();
+  redrawLive();
+}
+
+/*
+ * History records.
+ *
+ * The characteristic notifies the backlog. Each record is 8 bytes and the
+ * layout is fixed by src/history.h. The parser walks the buffer in 8-byte
+ * steps rather than assuming one record per notification, so it survives the
+ * firmware batching several records into one packet - which it may well do to
+ * get more of the buffer through per connection event.
+ */
+let histRows = [];
+
+function onHistory(ev) {
+  const dv = ev.target.value;
+  const size = CONFIG.histRecordBytes;
+  const whole = Math.floor(dv.byteLength / size);
+
+  if (whole === 0) {
+    log('Received ' + dv.byteLength + ' bytes, less than one whole record (' + size + ' bytes)');
+    return;
+  }
+
+  let newest = null;
+  for (let off = 0; off + size <= dv.byteLength; off += size) {
+    const uptime = dv.getUint32(off, true);
+    const c100 = dv.getInt16(off + 4, true);
+    const p100 = dv.getUint16(off + 6, true);
+    histRows.push({ uptime, c100, p100 });
+    newest = { uptime, c100, p100 };
+  }
+
+  // Rebuild the history series from the full set, so a replay that arrives in
+  // several notifications still draws as one line.
+  hist.temp.points = histRows.map((r) => ({ y: r.c100 / CONFIG.tempScale }));
+  hist.hum.points  = histRows.map((r) => ({ y: r.p100 / CONFIG.humScale }));
+  redrawHist();
+  renderHistTable();
+
+  if (newest) {
+    log('Received ' + whole + ' record(s), ' + histRows.length +
+        ' in total (newest: t=' + newest.uptime + 's)');
+  }
+}
+
+function renderHistTable() {
+  const body = $('histBody');
+  if (!histRows.length) {
+    body.innerHTML = '<tr><td colspan="3" style="color:var(--dim)">No data yet</td></tr>';
+    return;
+  }
+  // Newest first: the most recent record is the one that answers "did it keep
+  // sampling while I was away".
+  const rows = histRows.slice().reverse().slice(0, 200).map((r) =>
+    '<tr><td>' + r.uptime + '</td><td>' + (r.c100 / 100).toFixed(2) +
+    '</td><td>' + (r.p100 / 100).toFixed(2) + '</td></tr>');
+  body.innerHTML = rows.join('');
+}
+
+/* ---------------------------------------------------------------------------
+ * Control point
+ * ------------------------------------------------------------------------ */
+async function sendControl(code, label, confirmText) {
+  if (!ctrlChar) { log('Not connected - control command not sent', 'err'); return; }
+  if (confirmText && !confirm(confirmText)) return;
+
+  const bytes = new Uint8Array([code]);
+  try {
+    if (ctrlChar.properties.writeWithoutResponse) {
+      await ctrlChar.writeValueWithoutResponse(bytes);
+    } else {
+      await ctrlChar.writeValue(bytes);
+    }
+    log('Control command sent: ' + label + ' (0x' + code.toString(16).padStart(2, '0') + ')');
+  } catch (e) {
+    log('Control command failed: ' + e.message, 'err');
+  }
+}
+
+/* --------------------------------------------------------------------------- */
+$('connect').onclick = connect;
+$('disconnect').onclick = disconnect;
+
+$('replay').onclick = () => sendControl(CTRL.START_REPLAY, 'start replay');
+
+$('stopReplay').onclick = () => sendControl(CTRL.STOP_REPLAY, 'stop replay');
+
+$('clear').onclick = () => {
+  histRows = [];
+  hist.temp.points = []; hist.hum.points = [];
+  redrawHist(); renderHistTable();
+  sendControl(CTRL.CLEAR_HISTORY, 'clear history',
+              'Discard the history buffer on the device?');
+};
+
+$('bootloader').onclick = () => sendControl(
+  CTRL.ENTER_BOOTLOADER, 'enter bootloader',
+  'Reboot the node into its UF2 bootloader?\n\n' +
+  'The device disconnects and mounts as a NICENANO volume, ready for a new .uf2 to be copied onto it.');
+
+window.addEventListener('resize', () => { redrawLive(); redrawHist(); });
+
+redrawLive();
+redrawHist();
+log('Page ready. Click Connect to select ' + CONFIG.namePrefix + '.');
+log('Note: this needs localhost or https, and a browser that implements Web Bluetooth.');
+</script>
+</body>
+</html>
