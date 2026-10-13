@@ -1,0 +1,10 @@
+# Normalize line endings for a cross-platform Zephyr project.
+# The shell scripts are run through WSL bash, so they must stay LF on checkout:
+# a CRLF shebang fails with "bash: ...: /bin/bash^M: bad interpreter".
+* text=auto eol=lf
+
+# Build artifacts and media stay byte-for-byte
+*.uf2 binary
+*.hex binary
+*.zip binary
+*.pdf binary
